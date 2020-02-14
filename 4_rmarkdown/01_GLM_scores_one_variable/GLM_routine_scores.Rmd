@@ -1,0 +1,72 @@
+---
+title: "Résultats GLM Poisson"
+author: "Francis Duval"
+date: "15/08/2019"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(include = FALSE, echo = FALSE)
+```
+
+```{r Load packages}
+library(tidyverse)
+library(here)
+library(magrittr)
+library(glue)
+library(broom)
+library(kableExtra)
+library(R.filesets)
+options(scipen = 999)
+
+here <- here::here
+filter <- dplyr::filter
+```
+
+```{r Load datasets}
+claims <- loadRDS(here("2_pipeline", "14_output_claims", "claims.RDS"))
+scores_files <- c(
+  here("2_pipeline", "11_compute_scores_density", "scores_distance.RDS"),
+  here("2_pipeline", "11_compute_scores_density", "scores_time.RDS"),
+  here("2_pipeline", "12_compute_scores_rectangles", "scores_distance_time.RDS"),
+  here("2_pipeline", "13_compute_gini_hoover", "gini_hoover_indices.RDS")
+)
+
+scores_df <- map(scores_files, ~loadRDS(.x)) %>%
+  reduce(left_join, by = "ENROLLED_VIN") %>%
+  filter(ENROLLED_VIN %in% claims$ENROLLED_VIN) %>%
+  select(-ENROLLED_VIN)
+```
+
+```{r Entrainer les GLM}
+glm_results <- scores_df %>%
+  map(~ glm(claims$nb_claims ~ .x + offset(log(claims$expo_time)), family = poisson, data = scores_df)) %>% 
+  map(tidy) %>% 
+  map_df(slice, 2) %>% 
+  mutate(term = names(scores_df)) %>% 
+  setNames(c("Variable", "Estimé", "Écart-type", "Statistique z", "Valeur-p"))
+```
+
+```{r Function to print HTML table}
+print_results <- function(data) {
+  data %>% 
+    mutate(`Valeur-p` = formatC(round(`Valeur-p`, 4), format = "f", digits = 4)) %>% 
+    mutate(`Valeur-p` = cell_spec(`Valeur-p`, "html", background = ifelse(`Valeur-p` < 0.05, "green", "red"), color = "white")) %>% 
+    kable(format = "html", linesep = "", escape = F) %>%
+    kable_styling(
+      bootstrap_options = c("striped", "hover"),
+      position = "left"
+    )
+}
+```
+
+Le but ici est de voir si les scores de routine calculés aident à prédire la fréquence de réclamation pour les couvertures 10, 12 et 26. On fait un GLM Poisson à une seule variable pour chacun des scores de routine calculés. La variable réponse est le nombre de réclamations dans la période de couverture et l'exposition est le temps de police (en années).
+
+```{r Print HTML table, include = T}
+print_results(glm_results)
+```
+
+
+

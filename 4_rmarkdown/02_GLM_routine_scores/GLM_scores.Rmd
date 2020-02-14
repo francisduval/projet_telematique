@@ -1,0 +1,82 @@
+---
+title: "Les scores de routine calculés ont-ils un impact sur la sinistralité?"
+author: "Francis Duval"
+date: "16/12/2019"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(include = F, echo = F)
+```
+
+```{r Source librairies and load datasets}
+source("source.R")
+
+claims <- loadRDS(here("2_pipeline", "14_output_claims", "claims.RDS"))
+scores_distance <- loadRDS(here("2_pipeline", "11_compute_scores_density", "scores_distance.RDS"))
+scores_time <- loadRDS(here("2_pipeline", "11_compute_scores_density", "scores_time.RDS"))
+scores_distance_time <- loadRDS(here("2_pipeline", "12_compute_scores_rectangles", "scores_distance_time.RDS"))
+scores_gini_hoover <- loadRDS(here("2_pipeline", "13_compute_gini_hoover", "gini_hoover_indices.RDS"))
+```
+
+```{r Add routine scores to the claims dataset}
+claims_scores <- claims %>% 
+  left_join(scores_distance, by = "ENROLLED_VIN") %>% 
+  left_join(scores_time, by = "ENROLLED_VIN") %>% 
+  left_join(scores_distance_time, by = "ENROLLED_VIN") %>% 
+  left_join(scores_gini_hoover, by = "ENROLLED_VIN") %>% 
+  mutate(lnexpo_time = log(expo_time), lnexpo_distance = log(expo_distance)) %>% 
+  select(
+    -ENROLLED_VIN,
+    -expo_time,
+    -expo_distance,
+    -freq_time,
+    -freq_distance
+  )
+```
+
+```{r GLM avec temps de police comme exposition}
+glm_time_data <- claims_scores %>% 
+  select(-lnexpo_distance)
+
+f <- as.formula(nb_claims ~. -lnexpo_time + offset(lnexpo_time))
+glm_fit_time <- glm(f, family = "quasipoisson", data = glm_time_data)
+```
+
+```{r GLM avec distance parcourue comme exposition}
+glm_distance_data <- claims_scores %>% 
+  select(-lnexpo_time)
+
+f <- as.formula(nb_claims ~. -lnexpo_distance + offset(lnexpo_distance))
+glm_fit_distance <- glm(f, family = "quasipoisson", data = glm_distance_data)
+```
+
+### GLM quasi-Poisson avec temps de police comme mesure d'exposition. La variable réponse est le nombre de réclamations.
+
+```{r Résultats - GLM temps, include = T}
+glm_fit_time %>% 
+tidy() %>% 
+mutate(p.value = formatC(round(p.value, 4), format = "f", digits = 4)) %>% 
+mutate(p.value = cell_spec(p.value, "html", background = ifelse(p.value < 0.05, "green", "red"), color = "white")) %>% 
+kable(format = "html", linesep = "", escape = F) %>%
+kable_styling(
+  bootstrap_options = c("striped", "hover"),
+  position = "left"
+)
+```
+
+### GLM quasi-Poisson avec distance parcourue comme mesure d'exposition. La variable réponse est le nombre de réclamations.
+
+```{r Résultats - GLM distance, include = T}
+glm_fit_distance %>% 
+tidy() %>% 
+mutate(p.value = formatC(round(p.value, 4), format = "f", digits = 4)) %>% 
+mutate(p.value = cell_spec(p.value, "html", background = ifelse(p.value < 0.05, "green", "red"), color = "white")) %>% 
+kable(format = "html", linesep = "", escape = F) %>%
+kable_styling(
+  bootstrap_options = c("striped", "hover"),
+  position = "left"
+)
+```
